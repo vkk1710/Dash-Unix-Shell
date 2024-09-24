@@ -5,7 +5,14 @@
 #include <sys/wait.h>
 
 #define MAX_TOKENS 100
-#define DEFAULT_PATH "/bin"
+
+// Variable to store the search paths for executables (initial value is "/bin")
+char *search_paths = NULL;
+
+// Function to initialize the default path (set it to "/bin")
+void init_path() {
+    search_paths = strdup("/bin");  // Default path is "/bin"
+}
 
 // Function to parse the input
 char **parse_input(char *input) {
@@ -24,28 +31,38 @@ char **parse_input(char *input) {
     return tokens;
 }
 
-// Function to execute commands using execv
-void execute_command(char **args, char *path) {
-    pid_t pid = fork();  // Create a new process
-
-    if (pid == 0) {  // Child process
-        // Construct the full path to the executable
-        char exec_path[512];
-        snprintf(exec_path, sizeof(exec_path), "%s/%s", path, args[0]);
-
-        // Execute the command using execv
-        if (execv(exec_path, args) == -1) {
-            perror("dash: execv failed");
-        }
-        exit(EXIT_FAILURE);  // If execv fails, exit child process
-    } else if (pid > 0) {  // Parent process
-        // Wait for the child process to finish
-        int status;
-        waitpid(pid, &status, 0);
-    } else {
-        // Fork failed
-        perror("dash: fork failed");
+// Built-in function for 'path'
+int builtin_path(char **args) {
+    // Free the current search paths
+    if (search_paths != NULL) {
+        free(search_paths);
     }
+
+    // If no arguments are provided, set search_paths to NULL (disable external commands)
+    if (args[1] == NULL) {
+        search_paths = NULL;
+    } else {
+        // Concatenate all the provided paths into one space-separated string
+        size_t length = 0;
+        int i;
+        for (i = 1; args[i] != NULL; i++) {
+            length += strlen(args[i]) + 1;  // Add space for each path and a space
+        }
+        search_paths = malloc(length * sizeof(char));
+        search_paths[0] = '\0';  // Initialize as an empty string
+
+        // Copy each argument (path) into the search_paths string
+        int j;
+        for (j = 1; args[j] != NULL; j++) {
+            strcat(search_paths, args[j]);
+            if (args[j + 1] != NULL) {
+                strcat(search_paths, " ");  // Add a space between paths
+            }
+        }
+    }
+    printf("path - %s\n", search_paths);
+
+    return 1;
 }
 
 // Built-in function for 'cd'
@@ -62,8 +79,10 @@ int builtin_cd(char **args) {
     if (chdir(args[1]) != 0) {
         perror("dash: cd");
     }
-
+    printf("path - %s\n", search_paths);
     return 1;
+        
+
 }
 
 // Built-in function for 'exit'
@@ -75,13 +94,64 @@ int builtin_exit(char **args) {
     exit(0);  // Exit with success
 }
 
+// Function to execute commands using execv
+// Function to execute commands using execv
+void execute_command(char **args) {
+    if (search_paths == NULL) {
+        fprintf(stderr, "dash: no valid paths set, unable to execute external commands\n");
+        return;  // No valid paths, only built-in commands can execute
+    }
+
+    // Make a copy of search_paths to avoid modifying the original string
+    char *paths_copy = strdup(search_paths);
+    if (paths_copy == NULL) {
+        perror("dash: strdup failed");
+        return;
+    }
+
+    // Tokenize the copy of search_paths (space-separated) into individual paths
+    char *path = strtok(paths_copy, " ");
+    while (path != NULL) {
+        char exec_path[512];
+        snprintf(exec_path, sizeof(exec_path), "%s/%s", path, args[0]);
+
+        // Check if the file is executable using access()
+        if (access(exec_path, X_OK) == 0) {
+            pid_t pid = fork();  // Create a new process
+            if (pid == 0) {  // Child process
+                execv(exec_path, args);  // Execute the command
+                perror("dash: execv failed");  // If execv fails
+                exit(EXIT_FAILURE);
+            } else if (pid > 0) {  // Parent process
+                int status;
+                waitpid(pid, &status, 0);  // Wait for the child process to finish
+            } else {
+                perror("dash: fork failed");
+            }
+
+            free(paths_copy);  // Free the copy of search_paths
+            return;  // If a command executes successfully, return
+        }
+
+        // Continue to the next path in search_paths
+        path = strtok(NULL, " ");
+    }
+
+    fprintf(stderr, "dash: command not found: %s\n", args[0]);
+
+    free(paths_copy);  // Free the copy of search_paths
+}
+
+
 int main(int argc, char *argv[]) {
     char *input = NULL;  // getline will allocate memory for this
     size_t len = 0;  // To store the size of the buffer for getline
     ssize_t nread;  // To store the number of characters read by getline
     char **args;
-    char *path = DEFAULT_PATH;  // Initial path set to /bin
     FILE *input_stream = stdin;  // Default to standard input (interactive mode)
+
+    // Initialize the path to "/bin"
+    init_path();
 
     // Check if running in batch mode (argc == 2, meaning a file was provided)
     if (argc == 2) {
@@ -89,11 +159,11 @@ int main(int argc, char *argv[]) {
         input_stream = fopen(argv[1], "r");
         if (input_stream == NULL) {
             perror("dash: cannot open batch file");
-            exit(EXIT_FAILURE);  // Exit with an error if the file can't be opened
+            exit(1);  // Exit with an error if the file can't be opened
         }
     } else if (argc > 2) {
         fprintf(stderr, "dash: too many arguments\n");
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
     while (1) {
@@ -115,18 +185,17 @@ int main(int argc, char *argv[]) {
         // Parse the input into arguments
         args = parse_input(input);
 
-        // Check if the command is "cd" and handle it as a built-in command
+        // Check for built-in commands: "cd", "exit", or "path"
         if (args[0] != NULL && strcmp(args[0], "cd") == 0) {
             builtin_cd(args);
-        }
-        // Check if the command is "exit" and handle it as a built-in command
-        else if (args[0] != NULL && strcmp(args[0], "exit") == 0) {
+        } else if (args[0] != NULL && strcmp(args[0], "exit") == 0) {
             builtin_exit(args);
-        }
-        // If not a built-in command, execute it as an external command
-        else {
+        } else if (args[0] != NULL && strcmp(args[0], "path") == 0) {
+            builtin_path(args);
+        } else {
+            // If not a built-in command, execute it as an external command
             if (args[0] != NULL) {
-                execute_command(args, path);
+                execute_command(args);
             }
         }
 
