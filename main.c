@@ -48,6 +48,33 @@ void execute_command(char **args, char *path) {
     }
 }
 
+// Built-in function for 'cd'
+int builtin_cd(char **args) {
+    if (args[1] == NULL) {
+        fprintf(stderr, "dash: cd: missing argument\n");
+        return 1;  // Error, missing argument
+    } else if (args[2] != NULL) {
+        fprintf(stderr, "dash: cd: too many arguments\n");
+        return 1;  // Error, too many arguments
+    }
+
+    // Change directory using chdir()
+    if (chdir(args[1]) != 0) {
+        perror("dash: cd");
+    }
+
+    return 1;
+}
+
+// Built-in function for 'exit'
+int builtin_exit(char **args) {
+    if (args[1] != NULL) {
+        fprintf(stderr, "dash: exit: too many arguments\n");
+        return 1;  // Error, too many arguments
+    }
+    exit(0);  // Exit with success
+}
+
 int main(int argc, char *argv[]) {
     char *input = NULL;  // getline will allocate memory for this
     size_t len = 0;  // To store the size of the buffer for getline
@@ -62,11 +89,11 @@ int main(int argc, char *argv[]) {
         input_stream = fopen(argv[1], "r");
         if (input_stream == NULL) {
             perror("dash: cannot open batch file");
-            exit(1);  // Exit with an error if the file can't be opened
+            exit(EXIT_FAILURE);  // Exit with an error if the file can't be opened
         }
     } else if (argc > 2) {
         fprintf(stderr, "dash: too many arguments\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     while (1) {
@@ -88,19 +115,19 @@ int main(int argc, char *argv[]) {
         // Parse the input into arguments
         args = parse_input(input);
 
-        // If the user types "exit", exit the shell
-        if (args[0] != NULL && strcmp(args[0], "exit") == 0) {
-            free(args);
-            free(input);  // Free the input buffer allocated by getline
-            if (input_stream != stdin) {
-                fclose(input_stream);  // Close the file in batch mode
-            }
-            exit(0);  // Exit gracefully
+        // Check if the command is "cd" and handle it as a built-in command
+        if (args[0] != NULL && strcmp(args[0], "cd") == 0) {
+            builtin_cd(args);
         }
-
-        // If the input is not empty, execute the command
-        if (args[0] != NULL) {
-            execute_command(args, path);
+        // Check if the command is "exit" and handle it as a built-in command
+        else if (args[0] != NULL && strcmp(args[0], "exit") == 0) {
+            builtin_exit(args);
+        }
+        // If not a built-in command, execute it as an external command
+        else {
+            if (args[0] != NULL) {
+                execute_command(args, path);
+            }
         }
 
         // Free memory for the parsed arguments
