@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #define MAX_TOKENS 100
 
@@ -14,8 +15,8 @@ void init_path() {
     search_paths = strdup("/bin");  // Default path is "/bin"
 }
 
-// Function to parse the input
-char **parse_input(char *input) {
+// Function to parse the input and detect redirection
+char **parse_input(char *input, char **redirect_file) {
     char **tokens = malloc(MAX_TOKENS * sizeof(char *));
     char *token;
     int index = 0;
@@ -23,7 +24,19 @@ char **parse_input(char *input) {
     // Tokenize the input string using space as a delimiter
     token = strtok(input, " \t\r\n");
     while (token != NULL) {
-        tokens[index++] = token;
+        if (strcmp(token, ">") == 0) {
+            // Get the next token as the redirection file
+            token = strtok(NULL, " \t\r\n");
+            if (token == NULL || *redirect_file != NULL) {
+                fprintf(stderr, "dash: syntax error in redirection\n");
+                free(tokens);
+                return NULL;  // Error: either no file specified or multiple redirections
+            }
+            *redirect_file = token;
+        } else {
+            
+            tokens[index++] = token;
+        }
         token = strtok(NULL, " \t\r\n");
     }
     tokens[index] = NULL;  // Null-terminate the list of tokens
@@ -126,6 +139,19 @@ char *find_executable(char *command) {
 
 // Function to execute commands using execv
 void execute_command(char **args) {
+    // if (redirect_file != NULL) {
+    //         // Open the file for writing and truncate if it exists
+    //         int fd = open(redirect_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    //         if (fd == -1) {
+    //             perror("dash: cannot open file for redirection");
+    //             exit(EXIT_FAILURE);
+    //         }
+    //         // Redirect stdout and stderr to the file
+    //         dup2(fd, STDOUT_FILENO);
+    //         dup2(fd, STDERR_FILENO);
+    //         close(fd);  // Close the file descriptor as it's no longer needed
+    //     }
+
     if (search_paths == NULL) {
         fprintf(stderr, "dash: no valid paths set, unable to execute external commands\n");
         return;  // No valid paths, only built-in commands can execute
@@ -142,7 +168,8 @@ void execute_command(char **args) {
     pid_t pid = fork();
     if (pid == 0) {  // Child process
         execv(exec_path, args);  // Execute the command
-        perror("dash: execv failed");  // If execv fails
+        // perror("dash: execv failed");  // If execv fails
+        fprintf(stderr, "dash: execv failed");
         exit(EXIT_FAILURE);
     } else if (pid > 0) {  // Parent process
         int status;
@@ -154,12 +181,45 @@ void execute_command(char **args) {
     free(exec_path);  // Free the allocated exec_path
 }
 
+void check_redirection(char *redirect_file, int *saved_stdout, int *saved_stderr) {
+    if (redirect_file != NULL) {
+            *saved_stdout = dup(STDOUT_FILENO);
+            *saved_stderr = dup(STDERR_FILENO);
+
+            // Open the file for writing and truncate if it exists
+            int fd = open(redirect_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd == -1) {
+                perror("dash: cannot open file for redirection");
+                exit(EXIT_FAILURE);
+            }
+            // Redirect stdout and stderr to the file
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
+            close(fd);  // Close the file descriptor as it's no longer needed
+        }
+}
+
+void restore_redirection(int saved_stdout, int saved_stderr) {
+    if (saved_stdout != -1) {
+        dup2(saved_stdout, STDOUT_FILENO);
+        close(saved_stdout);
+    }
+    if (saved_stderr != -1) {
+        dup2(saved_stderr, STDERR_FILENO);
+        close(saved_stderr);
+    }
+}
+
+
+
 int main(int argc, char *argv[]) {
     char *input = NULL;  // getline will allocate memory for this
     size_t len = 0;  // To store the size of the buffer for getline
     ssize_t nread;  // To store the number of characters read by getline
     char **args;
+    char *redirect_file = NULL;  // Store the output file for redirection
     FILE *input_stream = stdin;  // Default to standard input (interactive mode)
+    int saved_stdout = -1, saved_stderr = -1;
 
     // Initialize the path to "/bin"
     init_path();
@@ -193,8 +253,17 @@ int main(int argc, char *argv[]) {
             exit(0);  // Exit gracefully
         }
 
-        // Parse the input into arguments
-        args = parse_input(input);
+        // Reset redirect_file for each new command
+        redirect_file = NULL;
+
+        // Parse the input into arguments and check for redirection
+        args = parse_input(input, &redirect_file);
+
+        check_redirection(redirect_file, &saved_stdout, &saved_stderr);
+
+        if (args == NULL) {
+            continue;  // Invalid command (error in parsing), skip this iteration
+        }
 
         // Check for built-in commands: "cd", "exit", or "path"
         if (args[0] != NULL && strcmp(args[0], "cd") == 0) {
@@ -206,9 +275,13 @@ int main(int argc, char *argv[]) {
         } else {
             // If not a built-in command, execute it as an external command
             if (args[0] != NULL) {
-                execute_command(args);
+                execute_command(args);                
             }
         }
+
+        // Restore stdout and stderr if redirected
+        restore_redirection(saved_stdout, saved_stderr);
+        saved_stdout = saved_stderr = -1;  // Reset to invalid
 
         // Free memory for the parsed arguments
         free(args);
