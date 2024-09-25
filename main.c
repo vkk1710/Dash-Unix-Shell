@@ -60,7 +60,6 @@ int builtin_path(char **args) {
             }
         }
     }
-    printf("path - %s\n", search_paths);
 
     return 1;
 }
@@ -79,10 +78,8 @@ int builtin_cd(char **args) {
     if (chdir(args[1]) != 0) {
         perror("dash: cd");
     }
-    printf("path - %s\n", search_paths);
-    return 1;
-        
 
+    return 1;
 }
 
 // Built-in function for 'exit'
@@ -94,7 +91,39 @@ int builtin_exit(char **args) {
     exit(0);  // Exit with success
 }
 
-// Function to execute commands using execv
+// Function to find the full path of an executable
+char *find_executable(char *command) {
+    if (search_paths == NULL) {
+        return NULL;  // No valid paths are set
+    }
+
+    // Make a copy of search_paths to avoid modifying the original string
+    char *paths_copy = strdup(search_paths);
+    if (paths_copy == NULL) {
+        perror("dash: strdup failed");
+        return NULL;
+    }
+
+    // Tokenize the copy of search_paths (space-separated) into individual paths
+    char *path = strtok(paths_copy, " ");
+    while (path != NULL) {
+        char *exec_path = malloc(512 * sizeof(char));
+        snprintf(exec_path, 512, "%s/%s", path, command);
+
+        // Check if the file is executable using access()
+        if (access(exec_path, X_OK) == 0) {
+            free(paths_copy);  // Free the copy of search_paths
+            return exec_path;  // Return the full executable path
+        }
+
+        free(exec_path);  // Free the current exec_path and move to the next path
+        path = strtok(NULL, " ");
+    }
+
+    free(paths_copy);  // Free the copy of search_paths
+    return NULL;  // No executable found
+}
+
 // Function to execute commands using execv
 void execute_command(char **args) {
     if (search_paths == NULL) {
@@ -102,46 +131,28 @@ void execute_command(char **args) {
         return;  // No valid paths, only built-in commands can execute
     }
 
-    // Make a copy of search_paths to avoid modifying the original string
-    char *paths_copy = strdup(search_paths);
-    if (paths_copy == NULL) {
-        perror("dash: strdup failed");
+    // Find the full path of the executable
+    char *exec_path = find_executable(args[0]);
+    if (exec_path == NULL) {
+        fprintf(stderr, "dash: command not found: %s\n", args[0]);
         return;
     }
 
-    // Tokenize the copy of search_paths (space-separated) into individual paths
-    char *path = strtok(paths_copy, " ");
-    while (path != NULL) {
-        char exec_path[512];
-        snprintf(exec_path, sizeof(exec_path), "%s/%s", path, args[0]);
-
-        // Check if the file is executable using access()
-        if (access(exec_path, X_OK) == 0) {
-            pid_t pid = fork();  // Create a new process
-            if (pid == 0) {  // Child process
-                execv(exec_path, args);  // Execute the command
-                perror("dash: execv failed");  // If execv fails
-                exit(EXIT_FAILURE);
-            } else if (pid > 0) {  // Parent process
-                int status;
-                waitpid(pid, &status, 0);  // Wait for the child process to finish
-            } else {
-                perror("dash: fork failed");
-            }
-
-            free(paths_copy);  // Free the copy of search_paths
-            return;  // If a command executes successfully, return
-        }
-
-        // Continue to the next path in search_paths
-        path = strtok(NULL, " ");
+    // Create a new process to execute the command
+    pid_t pid = fork();
+    if (pid == 0) {  // Child process
+        execv(exec_path, args);  // Execute the command
+        perror("dash: execv failed");  // If execv fails
+        exit(EXIT_FAILURE);
+    } else if (pid > 0) {  // Parent process
+        int status;
+        waitpid(pid, &status, 0);  // Wait for the child process to finish
+    } else {
+        perror("dash: fork failed");
     }
 
-    fprintf(stderr, "dash: command not found: %s\n", args[0]);
-
-    free(paths_copy);  // Free the copy of search_paths
+    free(exec_path);  // Free the allocated exec_path
 }
-
 
 int main(int argc, char *argv[]) {
     char *input = NULL;  // getline will allocate memory for this
