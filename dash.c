@@ -16,36 +16,89 @@ void init_path() {
 }
 
 // Function to parse the input and detect redirection
+// char **parse_input(char *input, char **redirect_file) {
+//     char **tokens = malloc(MAX_TOKENS * sizeof(char *));
+//     char *token;
+//     int index = 0;
+//     int redirection_found = 0;  // To keep track if redirection has occurred
+
+//     // Tokenize the input string using space as a delimiter
+//     token = strtok(input, " \t\r\n");
+//     while (token != NULL) {
+//         if (strcmp(token, ">") == 0) {
+//             // Get the next token as the redirection file
+//             token = strtok(NULL, " \t\r\n");
+//             if (token == NULL || *redirect_file != NULL) {
+//                 fprintf(stderr, "An error has occurred\n");
+//                 free(tokens);
+//                 return NULL;  // Error: either no file specified or multiple redirections
+//             }
+//             *redirect_file = token;
+//             redirection_found = 1;  // Mark that a redirection has occurred
+//         } else if (redirection_found) {
+//             // If a redirection file is already found and there's more input, throw an error
+//             *redirect_file = NULL;
+//             fprintf(stderr, "An error has occurred\n");
+//             free(tokens);
+//             return NULL;  // Error: multiple files provided after redirection
+//         } else {
+//             tokens[index++] = token;
+//         }
+//         token = strtok(NULL, " \t\r\n");
+//     }
+//     tokens[index] = NULL;  // Null-terminate the list of tokens
+
+//     return tokens;
+// }
+
 char **parse_input(char *input, char **redirect_file) {
     char **tokens = malloc(MAX_TOKENS * sizeof(char *));
     char *token;
     int index = 0;
-    int redirection_found = 0;  // To keep track if redirection has occurred
+    int redirection_found = 0;
 
     // Tokenize the input string using space as a delimiter
     token = strtok(input, " \t\r\n");
+
     while (token != NULL) {
         if (strcmp(token, ">") == 0) {
-            // Get the next token as the redirection file
+            // If `>` is a separate token, get the next token as the redirection file
+            redirection_found = 1;
             token = strtok(NULL, " \t\r\n");
-            if (token == NULL || *redirect_file != NULL) {
+            if (token == NULL) {
                 fprintf(stderr, "An error has occurred\n");
                 free(tokens);
-                return NULL;  // Error: either no file specified or multiple redirections
+                return NULL;  // Error: No file specified for redirection
             }
-            *redirect_file = token;
-            redirection_found = 1;  // Mark that a redirection has occurred
+            *redirect_file = token;  // Set the redirection file
+        } else if (strchr(token, '>') != NULL) {
+            // If `>` is combined with the command (e.g., `test>out`)
+            redirection_found = 1;
+            char *command_part = strtok(token, ">");  // Split command before `>`
+            char *file_part = strtok(NULL, ">");      // Get file name after `>`
+
+            if (command_part != NULL) {
+                tokens[index++] = command_part;  // Add command part to tokens
+            }
+            if (file_part == NULL) {
+                fprintf(stderr, "An error has occurred\n");
+                free(tokens);
+                return NULL;  // Error: No file specified for redirection
+            }
+            *redirect_file = file_part;  // Set the redirection file
         } else if (redirection_found) {
-            // If a redirection file is already found and there's more input, throw an error
-            *redirect_file = NULL;
+            // Error if more tokens appear after redirection
             fprintf(stderr, "An error has occurred\n");
             free(tokens);
-            return NULL;  // Error: multiple files provided after redirection
+            return NULL;
         } else {
+            // Otherwise, it's a regular command token
             tokens[index++] = token;
         }
+
         token = strtok(NULL, " \t\r\n");
     }
+
     tokens[index] = NULL;  // Null-terminate the list of tokens
 
     return tokens;

@@ -1,9 +1,2 @@
-dash
-dash.c
-executeTests.py
 out
-README.md
-testcases
-textBatch.txt
-x.txt
-y
+test.c
