@@ -61,7 +61,12 @@ char **parse_input(char *input, char **redirect_file) {
     token = strtok(input, " \t\r\n");
 
     while (token != NULL) {
-        if (strcmp(token, ">") == 0) {
+        if (redirection_found) {
+            // Error if more tokens appear after redirection
+            fprintf(stderr, "An error has occurred\n");
+            free(tokens);
+            return NULL;
+        } else if (strcmp(token, ">") == 0) {
             // If `>` is a separate token, get the next token as the redirection file
             redirection_found = 1;
             token = strtok(NULL, " \t\r\n");
@@ -86,11 +91,6 @@ char **parse_input(char *input, char **redirect_file) {
                 return NULL;  // Error: No file specified for redirection
             }
             *redirect_file = file_part;  // Set the redirection file
-        } else if (redirection_found) {
-            // Error if more tokens appear after redirection
-            fprintf(stderr, "An error has occurred\n");
-            free(tokens);
-            return NULL;
         } else {
             // Otherwise, it's a regular command token
             tokens[index++] = token;
