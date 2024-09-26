@@ -15,42 +15,6 @@ void init_path() {
     search_paths = strdup("/bin");  // Default path is "/bin"
 }
 
-// Function to parse the input and detect redirection
-// char **parse_input(char *input, char **redirect_file) {
-//     char **tokens = malloc(MAX_TOKENS * sizeof(char *));
-//     char *token;
-//     int index = 0;
-//     int redirection_found = 0;  // To keep track if redirection has occurred
-
-//     // Tokenize the input string using space as a delimiter
-//     token = strtok(input, " \t\r\n");
-//     while (token != NULL) {
-//         if (strcmp(token, ">") == 0) {
-//             // Get the next token as the redirection file
-//             token = strtok(NULL, " \t\r\n");
-//             if (token == NULL || *redirect_file != NULL) {
-//                 fprintf(stderr, "An error has occurred\n");
-//                 free(tokens);
-//                 return NULL;  // Error: either no file specified or multiple redirections
-//             }
-//             *redirect_file = token;
-//             redirection_found = 1;  // Mark that a redirection has occurred
-//         } else if (redirection_found) {
-//             // If a redirection file is already found and there's more input, throw an error
-//             *redirect_file = NULL;
-//             fprintf(stderr, "An error has occurred\n");
-//             free(tokens);
-//             return NULL;  // Error: multiple files provided after redirection
-//         } else {
-//             tokens[index++] = token;
-//         }
-//         token = strtok(NULL, " \t\r\n");
-//     }
-//     tokens[index] = NULL;  // Null-terminate the list of tokens
-
-//     return tokens;
-// }
-
 char **parse_input(char *input, char **redirect_file) {
     char **tokens = malloc(MAX_TOKENS * sizeof(char *));
     char *token;
@@ -112,6 +76,7 @@ char **split_commands(char *input) {
     
     if (input[0] == '&' || input[0] == '>' || input[strlen(input) - 1] == '&' || input[strlen(input) - 1] == '>') {
         fprintf(stderr, "An error has occurred\n");
+        free(commands);  // Free commands
         return NULL;
     }
     
@@ -164,11 +129,8 @@ int builtin_path(char **args) {
 
 // Built-in function for 'cd'
 int builtin_cd(char **args) {
-    if (args[1] == NULL) {
-        fprintf(stderr, "An error has occurred\n");
-        return 1;  // Error, missing argument
-    } else if (args[2] != NULL) {
-        fprintf(stderr, "An error has occurred\n");
+    if (args[1] == NULL || args[2] != NULL) {
+         fprintf(stderr, "An error has occurred\n");
         return 1;  // Error, too many arguments
     }
     // Change directory using chdir()
@@ -254,11 +216,7 @@ void restore_redirection(int saved_stdout, int saved_stderr) {
 // new funcs -
 
 int is_builtin_command(char *command) {
-    if (strcmp(command, "cd") == 0 || strcmp(command, "exit") == 0 || strcmp(command, "path") == 0) {
-
-        return 1;
-    }
-    return 0;
+    return strcmp(command, "cd") == 0 || strcmp(command, "exit") == 0 || strcmp(command, "path") == 0;
 }
 
 void handle_builtin_command(char **args) {
@@ -277,44 +235,39 @@ void handle_builtin_command(char **args) {
 
 // new execute func
 void execute_command(char **commands) {
-    
     int pid, status, saved_stdout, saved_stderr, i, j;
     for (i = 0; commands[i] != NULL; i++) {
         char *redirect_file = NULL;
         char **parsed_args = parse_input(commands[i], &redirect_file);  // Call parse here
         if ((parsed_args != NULL && parsed_args[0] != NULL) && is_builtin_command(parsed_args[0])) {
-                handle_builtin_command(parsed_args);
-                continue;  // Exit after handling built-in command
-            }
+            handle_builtin_command(parsed_args);
+            free(parsed_args);
+            continue;  // Exit after handling built-in command
+        }
         pid = fork();
         saved_stdout = saved_stderr = -1;
 
-        if (pid == 0) {  // Child process
-            // Check and handle redirection in the child process
-            // char *redirect_file = NULL;
-            // char **parsed_args = parse_input(commands[i], &redirect_file);  // Call parse here
-            
-            // Check for built-in commands
-            // if (parsed_args[0] != NULL && is_builtin_command(parsed_args[0])) {
-            //     handle_builtin_command(parsed_args);
-            //     exit(0);  // Exit after handling built-in command
-            // }
+        if (pid == 0) {  
             check_redirection(redirect_file, &saved_stdout, &saved_stderr);
 
-           
             // Execute the command
             char *exec_path = find_executable(parsed_args[0]);
             if (exec_path == NULL) {
                 fprintf(stderr, "An error has occurred\n");
+                free(parsed_args);
                 exit(EXIT_FAILURE);
             }
             execv(exec_path, parsed_args);  // Execute the command
             fprintf(stderr, "An error has occurred\n");
+            free(exec_path);
             restore_redirection(saved_stdout, saved_stderr);
+            free(parsed_args);
             exit(EXIT_FAILURE);
-        } else if (pid < 0) {
+        } 
+        else if (pid < 0) {
             fprintf(stderr, "An error has occurred\n");
         }
+        free(parsed_args);
     }
 
     // Parent process waits for all child processes to finish
