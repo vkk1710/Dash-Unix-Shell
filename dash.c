@@ -5,7 +5,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#define MAX_TOKENS 100
+#define MAX_TOKENS 550
 
 // Variable to store the search paths for executables (initial value is "/bin")
 char *search_paths = NULL;
@@ -150,7 +150,6 @@ int builtin_exit(char **args) {
     exit(0);  // Exit with success
 }
 
-// Function to find the full path of an executable
 char *find_executable(char *command) {
     if (search_paths == NULL) {
         return NULL;  // No valid paths are set
@@ -158,20 +157,28 @@ char *find_executable(char *command) {
 
     // Make a copy of search_paths to avoid modifying the original string
     char *paths_copy = strdup(search_paths);
-    if (paths_copy == NULL) {
+    if (paths_copy == NULL) {  // Check if strdup() failed
         fprintf(stderr, "An error has occurred\n");
-        return NULL;
+        return NULL;  // Return NULL if memory allocation failed
     }
 
     // Tokenize the copy of search_paths (space-separated) into individual paths
     char *path = strtok(paths_copy, " ");
     while (path != NULL) {
-        char *exec_path = malloc(512 * sizeof(char));
-        snprintf(exec_path, 512, "%s/%s", path, command);
+        // Dynamically allocate enough space for the full path + command + '/' + '\0'
+        char *exec_path = malloc(strlen(path) + strlen(command) + 2);  // +2 for '/' and '\0'
+        if (exec_path == NULL) {
+            free(paths_copy);  // Free paths_copy before returning
+            fprintf(stderr, "An error has occurred\n");
+            return NULL;  // Return NULL if memory allocation failed
+        }
+
+        // Build the full path: path/command
+        snprintf(exec_path, strlen(path) + strlen(command) + 2, "%s/%s", path, command);
 
         // Check if the file is executable using access()
         if (access(exec_path, X_OK) == 0) {
-            free(paths_copy);  // Free the copy of search_paths
+             free(paths_copy);  // Free paths_copy before returning the exec_path
             return exec_path;  // Return the full executable path
         }
 
@@ -179,7 +186,7 @@ char *find_executable(char *command) {
         path = strtok(NULL, " ");
     }
 
-    free(paths_copy);  // Free the copy of search_paths
+    free(paths_copy);  // Free paths_copy when no executable is found
     return NULL;  // No executable found
 }
 
@@ -212,9 +219,6 @@ void restore_redirection(int saved_stdout, int saved_stderr) {
     }
 }
 
-
-// new funcs -
-
 int is_builtin_command(char *command) {
     return strcmp(command, "cd") == 0 || strcmp(command, "exit") == 0 || strcmp(command, "path") == 0;
 }
@@ -233,7 +237,6 @@ void handle_builtin_command(char **args) {
     }
 }
 
-// new execute func
 void execute_command(char **commands) {
     int pid, status, saved_stdout, saved_stderr, i, j;
     for (i = 0; commands[i] != NULL; i++) {
@@ -259,7 +262,7 @@ void execute_command(char **commands) {
             }
             execv(exec_path, parsed_args);  // Execute the command
             fprintf(stderr, "An error has occurred\n");
-            free(exec_path);
+            // free(exec_path);
             restore_redirection(saved_stdout, saved_stderr);
             free(parsed_args);
             exit(EXIT_FAILURE);
@@ -267,7 +270,7 @@ void execute_command(char **commands) {
         else if (pid < 0) {
             fprintf(stderr, "An error has occurred\n");
         }
-        free(parsed_args);
+        //free(parsed_args);
     }
 
     // Parent process waits for all child processes to finish
@@ -286,7 +289,6 @@ int main(int argc, char *argv[]) {
     ssize_t nread;  // To store the number of characters read by getline
     char **commands;
     FILE *input_stream = stdin;  // Default to standard input (interactive mode)
-
     // Initialize the path to "/bin"
     init_path();
 
